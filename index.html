@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tsugite Joint FEA</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 12h15l4-4h7v8H14l-4 4H3z' fill='%23f6f6f5' stroke='%232973c7' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script>try { const t = localStorage.getItem("jfea.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js",
+               "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <header id="statusbar">
+    <span class="brand">Tsugite FEA</span>
+    <span id="st-case" class="st">—</span>
+    <span id="st-frame" class="st mono"></span>
+    <span id="st-msg" class="st dim"></span>
+    <button id="btn-tour" class="chip" title="Exhibition mode: steps through the load cases on its own, plays the loading and turns the view; any touch pauses it for a while">auto tour</button>
+    <button id="btn-full" class="chip" title="Full screen (F11)">full screen</button>
+    <div class="chips inline" id="theme-chips" role="group" aria-label="Colour theme">
+      <button class="chip" data-theme="auto">auto</button><button class="chip" data-theme="light">light</button><button class="chip" data-theme="dark">dark</button>
+    </div>
+    <span id="st-backend" class="st pill">…</span>
+  </header>
+
+  <div id="main">
+    <!-- left: the three topics of compare.html -->
+    <aside id="left">
+      <nav id="topics" role="tablist" aria-label="Topic">
+        <button role="tab" data-topic="radar">Joint profiles against the solid bar</button>
+        <button role="tab" data-topic="bars">Joints next to the solid bar</button>
+        <button role="tab" data-topic="fd">Load against displacement</button>
+      </nav>
+      <div id="topic-body">
+        <section class="topic" id="topic-radar">
+          <p class="note">One outline per joint and sense; the distance from the centre is % of the solid bar, the reference heptagon is the solid at 100 %. Pick joints below; a single joint is drawn filled. Compression and tension have no sense and are shared by both outlines. Hover an axis for the values, click it to show that load case on the right.</p>
+          <div class="ctrl" id="radctl"></div>
+          <div class="legend" id="leg4"></div>
+          <div class="chart" id="radwrap"><svg id="rad" role="img" aria-label="Radar chart of percent of solid per load case, one outline per joint and sense"></svg><div class="tip" id="radtip" hidden></div></div>
+        </section>
+        <section class="topic" id="topic-bars" hidden>
+          <p class="note">The same scores as bars, with the solid bar at 100 % in every load case. Filled bar = + sense, hatched bar = − sense. Click a bar to open that joint and load case on the right.</p>
+          <div class="legend" id="leg2"></div>
+          <div class="chart" id="barwrap"><svg id="bar" role="img" aria-label="Bar chart of percent of solid per load case"></svg><div class="tip" id="bartip" hidden></div></div>
+        </section>
+        <section class="topic" id="topic-fd" hidden>
+          <p class="note">The raw curves behind the scores. The slope is the stiffness; a curve that bends over is no longer linear. The rings mark the increment shown on the right.</p>
+          <div class="tabs" id="tabs" role="group" aria-label="Load case"></div>
+          <div class="legend" id="leg3"></div>
+          <div class="chart" id="fdwrap"><svg id="fd" role="img" aria-label="Load against displacement"></svg><div class="tip" id="fdtip" hidden></div></div>
+          <p class="note" id="fdnote"></p>
+        </section>
+      </div>
+      <div id="left-foot" class="mono"></div>
+    </aside>
+
+    <div id="divider" role="separator" aria-orientation="vertical" aria-label="Drag to resize" tabindex="0"></div>
+
+    <!-- right: the FEA results, drawn with WebGPU -->
+    <main id="right">
+      <div id="toolbar">
+        <div class="trow">
+          <div class="seg" id="mode-seg" role="group" aria-label="View">
+            <button data-mode="compare">Compare joints</button><button data-mode="single">Single joint</button>
+          </div>
+          <div class="chips inline" id="type-chips" role="group" aria-label="Load case"></div>
+          <div class="seg" id="sense-seg" role="group" aria-label="Sense"><button data-sense="+">+</button><button data-sense="-">−</button></div>
+        </div>
+        <div class="trow">
+          <div class="chips inline" id="joint-chips" role="group" aria-label="Joints"></div>
+          <span class="tsep"></span>
+          <label for="sel-field" class="lab">field</label>
+          <select id="sel-field"></select>
+          <div class="seg small" id="layout-seg" role="group" aria-label="Layout of the four joints">
+            <button data-layout="rows" title="one row per joint">rows</button><button data-layout="grid" title="2 × 2">grid</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="stage">
+        <div id="view">
+          <canvas id="gpu"></canvas>
+          <div id="labels"></div>
+          <div id="probe" class="mono" hidden></div>
+          <div id="nav" aria-label="view navigation">
+            <button class="nb" id="nav-home" title="Home view (H)"><svg viewBox="0 0 16 16"><path d="M2.5 8.5 8 3.5l5.5 5M4 7.3V13h8V7.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+            <button class="nb arrow" id="nav-up" title="Roll the model up 90° (shows the face below)"><svg viewBox="0 0 16 16"><path d="M8 3.5 12.5 11.5h-9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+            <button class="nb" id="nav-turn" title="Turntable (T)"><svg viewBox="0 0 16 16"><path d="M12.3 8.6A4.4 4.4 0 1 1 11.1 5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M11.4 5.2 8.3 4.6l1.7-2.3z" fill="currentColor"/></svg></button>
+            <button class="nb arrow" id="nav-left" title="Roll the model left 90° (shows the right face)"><svg viewBox="0 0 16 16"><path d="M3.5 8 11.5 3.5v9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+            <canvas id="navcube" width="112" height="112"></canvas>
+            <button class="nb arrow" id="nav-right" title="Roll the model right 90° (shows the left face)"><svg viewBox="0 0 16 16"><path d="M12.5 8 4.5 3.5v9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+            <button class="nb" id="nav-fit" title="Fit the bar in the view (F); again: zoom to the joint"><svg viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+            <button class="nb arrow" id="nav-down" title="Roll the model down 90° (shows the top)"><svg viewBox="0 0 16 16"><path d="M8 12.5 3.5 4.5h9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+            <button class="nb" id="nav-proj" title="Perspective — click for orthographic (P)"><svg viewBox="0 0 16 16" class="ic-persp"><path d="M3 13 5.6 3h4.8L13 13z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><svg viewBox="0 0 16 16" class="ic-ortho" hidden><path d="M3.5 3.5h9v9h-9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+          </div>
+          <div id="nogpu" hidden>
+            <h2>WebGPU is not available here</h2>
+            <p>The results view needs WebGPU: Chrome or Edge 113+, Safari 26+ (macOS 26), or Firefox 141+ on Windows. On another device on the network, open the https address that <code>serve.py --https</code> prints. The charts on the left work in any browser.</p>
+            <p class="mono" id="nogpu-why"></p>
+          </div>
+          <div id="loading" class="mono" hidden></div>
+        </div>
+
+        <!-- display tools: a sidebar that folds to a narrow tab -->
+        <aside id="tools">
+          <button id="tools-toggle" title="show / hide the display tools"><span class="chev"></span><span class="t">Display</span></button>
+          <div class="body">
+            <h2>Section</h2>
+            <div class="row">
+              <div class="seg small" id="sec-seg" role="group" aria-label="Section plane">
+                <button data-axis="off">off</button><button data-axis="x" title="plane normal to X: cut along the bar through the width">X</button><button data-axis="y" title="plane normal to Y: cut across the bar">Y</button><button data-axis="z" title="plane normal to Z: cut along the bar through the depth">Z</button>
+              </div>
+              <button class="chip" id="sec-flip" title="keep the other side">flip</button>
+            </div>
+            <div class="row slider"><label for="sl-sec">at [mm]</label><input type="range" id="sl-sec" min="0" max="1000" value="500"><output id="out-sec" class="mono">0</output></div>
+            <h2>Surfaces</h2>
+            <div class="row slider"><label for="sl-skin">skin</label><input type="range" id="sl-skin" min="0" max="100" value="100"><output id="out-skin" class="mono">100 %</output></div>
+            <div class="row">
+              <label class="check" title="the faces where the parts of the joint meet (contact interface, peg faces, kerf)"><input type="checkbox" id="ck-inner" checked> joint faces</label>
+              <label class="check"><input type="checkbox" id="ck-edges" checked> edges</label>
+            </div>
+            <div class="row">
+              <label class="check" title="supports, loads and grips of the test"><input type="checkbox" id="ck-rig" checked> rig</label>
+              <label class="check" title="ten colour bands instead of a smooth scale"><input type="checkbox" id="ck-bands"> bands</label>
+            </div>
+            <h2>Explode</h2>
+            <div class="row slider"><label for="sl-explode">apart</label><input type="range" id="sl-explode" min="0" max="100" value="0"><output id="out-explode" class="mono">0</output></div>
+            <div class="row">
+              <span class="lab">along</span>
+              <div class="seg small" id="exp-seg" role="group" aria-label="Explode direction"><button data-ax="1">Y</button><button data-ax="0">X</button><button data-ax="2">Z</button></div>
+            </div>
+            <div id="bodies-row"><h2>Bodies</h2><div class="chips" id="body-chips"></div></div>
+            <p class="hint">drag: orbit · right-drag: pan · wheel: zoom · hover: read the value · double-click a joint: open it alone · space: play · ← →: increments</p>
+          </div>
+        </aside>
+      </div>
+
+      <div id="legend" aria-live="polite">
+        <div id="leg-title"></div>
+        <div id="leg-scale">
+          <input type="number" id="leg-lo" class="num" step="any" title="lower end of the colour range">
+          <div id="leg-barwrap"><canvas id="leg-bar" width="256" height="10"></canvas><div id="leg-ticks" class="mono"></div></div>
+          <input type="number" id="leg-hi" class="num" step="any" title="upper end of the colour range">
+        </div>
+        <select id="sel-cmap" title="colour map"></select>
+        <div class="seg small" id="range-seg" role="group" aria-label="Colour range">
+          <button data-range="robust" title="1st–99th percentile of the shown joints at the final increment: one stress peak at a contact edge does not wash out the rest">robust</button><button data-range="full" title="minimum to maximum at the final increment">full</button><button data-range="frame" title="follows the shown increment">per frame</button>
+        </div>
+      </div>
+
+      <div id="timeline">
+        <button id="btn-play" class="btn primary" title="Play the loading (space)">▶</button>
+        <div id="tl-track">
+          <input type="range" id="sl-t" min="0" max="1000" value="1000" aria-label="load step time">
+          <div id="tl-ticks"></div>
+        </div>
+        <output id="out-t" class="mono">t = 1.00</output>
+        <span class="tsep"></span>
+        <label for="sl-scale" class="lab">deformation ×</label>
+        <input type="range" id="sl-scale" min="0" max="1000" value="600">
+        <output id="out-scale" class="mono">auto</output>
+        <button class="chip" id="btn-scale-auto" title="scale so the largest displacement of the shown joints reads as 4 % of the bar length">auto</button>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
