@@ -223,5 +223,5 @@ select, .num { font: inherit; font-size: 12.5px; color: var(--fg); background: v
 @media (prefers-reduced-motion: reduce) { #nav .nb.on svg { animation: none; } * { transition: none !important; } }
 
 /* links between the charts and the 3-D view */
-.chart svg .cur { fill: var(--accent); font-weight: 600; }
+.chart svg .cur { fill: var(--fg); font-weight: 700; }
 .seg button.link[aria-pressed="true"] { background: var(--panel-2); color: var(--fg); box-shadow: inset 0 0 0 1px var(--accent); }

@@ -28,7 +28,8 @@ export class Charts {
     try { const s = JSON.parse(localStorage.getItem('jfea.radar') || '{}'); if (Array.isArray(s.off)) this.radState.off = s.off; if (['both', '+', '-'].includes(s.sense)) this.radState.sense = s.sense; if (s.link === false) this.radState.link = false; } catch (e) {}
     this.view = null;                  // what the 3-D view shows: {bodies, key, type}
     const scores = Object.values(DATA.runs).filter(r => this.usable(r)).map(r => r.score);
-    this.XMAX = Math.ceil(Math.max(100, ...scores) * 1.04 / 25) * 25;
+    this.XMAX0 = Math.max(100, ...scores);
+    this.XMAX = Math.ceil(this.XMAX0 * 1.04 / 25) * 25;
     this.cur = DATA.cases.find(c => this.withCurve(c))?.key || DATA.cases[0].key;
     this.markers = [];
     this._legends(); this._radarCtl(); this._tabs();
@@ -68,11 +69,12 @@ export class Charts {
     const svg = $('bar'), wrap = $('barwrap'), tip = $('bartip'), D = this.D;
     if (!wrap.clientWidth) return;
     svg.innerHTML = '';
-    const W = Math.max(420, wrap.clientWidth), L = 150, Rm = 56, T = 6, bh = 10, inner = 2, between = 7, pad = 12;
+    const W = Math.max(420, wrap.clientWidth), L = 150, Rm = 44, T = 6, bh = 10, inner = 2, between = 7, pad = 12;
     const defs = el('defs', {}, svg);
     D.bodies.forEach(b => { const p = el('pattern', { id: 'h-' + b, width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, defs);
       el('rect', { width: 6, height: 6, style: 'fill:var(--surface)' }, p); el('rect', { width: 3, height: 6, style: `fill:${this.col(b)}` }, p); });
-    const x = v => L + (W - L - Rm) * Math.min(v, this.XMAX) / this.XMAX;
+    const XB = Math.ceil(this.XMAX0 / 5) * 5;                     // bars end at the largest score, not the radar's ring
+    const x = v => L + (W - L - Rm) * Math.min(v, XB) / XB;
     const missLabel = r => r.rerun ? 'rerun pending' : r.state === 'not written' ? 'no input' : r.state;
     const rows = TYPES.map(([type, label]) => {
       const items = [], miss = {}, ks = this.keysOf(type);
@@ -95,13 +97,13 @@ export class Charts {
       y = Math.max(y, top + pad + 30); y += pad; placed.push({ row, top, bottom: y });
     });
     const H = y + 24; svg.setAttribute('width', W); svg.setAttribute('height', H);
-    for (let t = 0; t <= this.XMAX; t += 25) {
+    for (let t = 0; t <= XB; t += 25) {
       el('line', { x1: x(t), x2: x(t), y1: T, y2: H - 22, style: `stroke:${t === 100 ? 'var(--axis)' : 'var(--grid)'}`, 'stroke-width': t === 100 ? 1.5 : 1 }, svg);
       el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, svg).textContent = t + ' %';
     }
     const curType = this.view ? D.cases.find(c => c.key === this.view.key)?.type : null;
     placed.forEach(({ row, top, bottom }, i) => {
-      if (row.type === curType) el('rect', { x: 0, y: top + 1, width: W - 8, height: bottom - top - 2, rx: 4, style: 'fill:var(--accent);fill-opacity:.07' }, svg);
+      if (row.type === curType) el('rect', { x: 0, y: top + 1, width: W - 8, height: bottom - top - 2, rx: 4, style: 'fill:var(--fg);fill-opacity:.05' }, svg);
       if (i) el('line', { x1: 0, x2: W - 8, y1: top, y2: top, style: 'stroke:var(--grid)' }, svg);
       el('text', { x: 0, y: top + pad + 10, class: row.type === curType ? 'cur' : 'ink' }, svg).textContent = row.label.replace(/ \(.*\)/, '');
       el('text', { x: 0, y: top + pad + 25 }, svg).textContent = MEAS[row.type];
@@ -112,8 +114,8 @@ export class Charts {
         const w = Math.max(2, x(val) - L), rr = Math.min(4, w / 2);
         const d = `M${L},${it.y} h${w - rr} a${rr},${rr} 0 0 1 ${rr},${rr} v${bh - 2 * rr} a${rr},${rr} 0 0 1 -${rr},${rr} h-${w - rr} z`;
         const fill = it.c.sense === '-' && !it.solid ? `url(#h-${it.body})` : this.col(it.body);
-        const dim = !it.solid && !this.inView(it.body), here = this.view && it.c.key === this.view.key && this.inView(it.body);
-        el('path', { d, style: `fill:${fill};opacity:${(!this.stale(r) || it.solid ? 1 : 0.45) * (dim ? 0.22 : 1)}` + (here ? ';stroke:var(--fg);stroke-width:1.5' : '') }, svg);
+        const shown = this.view && this.inView(it.body), here = shown && it.c.key === this.view.key;
+        el('path', { d, style: `fill:${fill};opacity:${!this.stale(r) || it.solid ? 1 : 0.45}` + (here ? ';stroke:var(--fg);stroke-width:2' : shown ? ';stroke:var(--fg);stroke-width:1;stroke-opacity:.55' : '') }, svg);
         el('text', { x: x(val) + 6, y: it.y + 9, class: 'ink', style: 'font-size:11px' }, svg).textContent = (it.solid ? '100' : val.toFixed(1)) + (this.stale(r) ? ' †' : '');
         const hit = el('rect', { x: L, y: it.y - 2, width: Math.max(w + 40, 30), height: bh + 4, fill: 'transparent', tabindex: 0, class: 'click' }, svg);
         const show = () => tipAt(tip, wrap, x(val), it.y, `<b>${it.body}</b> · ${this.caseLabel(it.c)}<br>${it.solid ? 'reference, 100 %' : `${val.toFixed(1)} % of solid (${r.measure || MEAS[row.type]})`}${r.k !== undefined ? `<br>k = ${fmt(r.k)}` : ''}${it.solid ? '' : this.provisional(r)}<br><span style="color:var(--dim)">click: show it on the right</span>`);
@@ -178,7 +180,7 @@ export class Charts {
       const y0 = s < -0.5 ? y - 5 - lh * (lines.length - 1) : s > 0.5 ? y + 12 : y + 4 - lh * (lines.length - 1) / 2;
       const cur = this.view && this.D.cases.find(c => c.key === this.view.key)?.type === t;
       lines.forEach((txt, k) => el('text', { x, y: y0 + k * lh, 'text-anchor': anchor, class: k && !narrow ? (cur ? 'cur' : '') : (cur ? 'cur' : 'ink'), style: `font-size:${narrow || k ? 11 : 12}px` }, svg).textContent = txt);
-      if (cur) { spokes[i].style.stroke = 'var(--accent)'; spokes[i].setAttribute('stroke-width', 1.5); spokes[i].dataset.cur = 1; }
+      if (cur) { spokes[i].style.stroke = 'var(--muted)'; spokes[i].setAttribute('stroke-width', 1.5); spokes[i].dataset.cur = 1; }
     });
     const senses = st.sense === 'both' ? ['+', '-'] : [st.sense];
     const shown = this.radarShown();
@@ -201,7 +203,7 @@ export class Charts {
     const ab = -Math.PI / 2 - Math.PI / n;
     for (let t = 25; t <= this.XMAX; t += 25) { const r = Rpx * t / this.XMAX * Math.cos(Math.PI / n);
       el('text', { x: cx + r * Math.cos(ab) - 3, y: cy + r * Math.sin(ab) + 4, 'text-anchor': 'end', style: 'font-size:11px;fill:var(--faint);paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round' }, svg).textContent = t === 100 ? '100 %' : t; }
-    const baseStroke = l => l.dataset.cur ? 'var(--accent)' : 'var(--grid)';
+    const baseStroke = l => l.dataset.cur ? 'var(--muted)' : 'var(--grid)';
     const hide = () => { tip.hidden = true; spokes.forEach(l => l.style.stroke = baseStroke(l)); };
     RAD_AX.forEach(([t, lab], i) => {
       const a1 = ang(i) - Math.PI / n, a2 = ang(i) + Math.PI / n, rr = Rpx + 12;

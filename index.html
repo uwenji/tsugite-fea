@@ -32,26 +32,26 @@
     <!-- left: the three topics of compare.html -->
     <aside id="left">
       <nav id="topics" role="tablist" aria-label="Topic">
-        <button role="tab" data-topic="fd">Load against displacement</button>
-        <button role="tab" data-topic="radar">Joint profiles against the solid bar</button>
-        <button role="tab" data-topic="bars">Joints next to the solid bar</button>
+        <button role="tab" data-topic="fd" title="Load against displacement">Load–displacement</button>
+        <button role="tab" data-topic="radar" title="Joint profiles against the solid bar">Profiles</button>
+        <button role="tab" data-topic="bars" title="Joints next to the solid bar">Scores</button>
       </nav>
       <div id="topic-body">
         <section class="topic" id="topic-fd">
-          <p class="note">The raw curves behind the scores. The slope is the stiffness; a curve that bends over is no longer linear. The rings mark the increment shown on the right.</p>
+          <p class="note"><b>Load against displacement.</b> The raw curves behind the scores. The slope is the stiffness; a curve that bends over is no longer linear. The rings mark the increment shown on the right.</p>
           <div class="tabs" id="tabs" role="group" aria-label="Load case"></div>
           <div class="legend" id="leg3"></div>
           <div class="chart" id="fdwrap"><svg id="fd" role="img" aria-label="Load against displacement"></svg><div class="tip" id="fdtip" hidden></div></div>
           <p class="note" id="fdnote"></p>
         </section>
         <section class="topic" id="topic-radar" hidden>
-          <p class="note">One outline per joint and sense; the distance from the centre is % of the solid bar, the reference heptagon is the solid at 100 %. Pick joints below (linked: the joints shown on the right; unlink to pick freely); a single joint is drawn filled. Compression and tension have no sense and are shared by both outlines. Hover an axis for the values, click it to show that load case on the right.</p>
+          <p class="note"><b>Joint profiles against the solid bar.</b> One outline per joint and sense; the distance from the centre is % of the solid bar, the reference heptagon is the solid at 100 %. Pick joints below (linked: the joints shown on the right; unlink to pick freely); a single joint is drawn filled. Compression and tension have no sense and are shared by both outlines. Hover an axis for the values, click it to show that load case on the right.</p>
           <div class="ctrl" id="radctl"></div>
           <div class="legend" id="leg4"></div>
           <div class="chart" id="radwrap"><svg id="rad" role="img" aria-label="Radar chart of percent of solid per load case, one outline per joint and sense"></svg><div class="tip" id="radtip" hidden></div></div>
         </section>
         <section class="topic" id="topic-bars" hidden>
-          <p class="note">The same scores as bars, with the solid bar at 100 % in every load case. Filled bar = + sense, hatched bar = − sense. Click a bar to open that joint and load case on the right; the joints and the load case shown there are highlighted.</p>
+          <p class="note"><b>Joints next to the solid bar.</b> The same scores as bars, with the solid bar at 100 % in every load case. Filled bar = + sense, hatched bar = − sense. Click a bar to open that joint and load case on the right; the joints shown there are outlined (thicker in the load case shown), that load case has a grey band.</p>
           <div class="legend" id="leg2"></div>
           <div class="chart" id="barwrap"><svg id="bar" role="img" aria-label="Bar chart of percent of solid per load case"></svg><div class="tip" id="bartip" hidden></div></div>
         </section>
