@@ -114,8 +114,9 @@ export class Charts {
         const w = Math.max(2, x(val) - L), rr = Math.min(4, w / 2);
         const d = `M${L},${it.y} h${w - rr} a${rr},${rr} 0 0 1 ${rr},${rr} v${bh - 2 * rr} a${rr},${rr} 0 0 1 -${rr},${rr} h-${w - rr} z`;
         const fill = it.c.sense === '-' && !it.solid ? `url(#h-${it.body})` : this.col(it.body);
-        const shown = this.view && this.inView(it.body), here = shown && it.c.key === this.view.key;
-        el('path', { d, style: `fill:${fill};opacity:${!this.stale(r) || it.solid ? 1 : 0.45}` + (here ? ';stroke:var(--fg);stroke-width:2' : shown ? ';stroke:var(--fg);stroke-width:1;stroke-opacity:.55' : '') }, svg);
+        // outlines only inside the grey band of the load case shown: the bars of the joints on the right, thicker in its sense
+        const inRow = this.view && row.type === curType && this.inView(it.body), here = inRow && it.c.key === this.view.key;
+        el('path', { d, style: `fill:${fill};opacity:${!this.stale(r) || it.solid ? 1 : 0.45}` + (here ? ';stroke:var(--fg);stroke-width:2' : inRow ? ';stroke:var(--fg);stroke-width:1;stroke-opacity:.55' : '') }, svg);
         el('text', { x: x(val) + 6, y: it.y + 9, class: 'ink', style: 'font-size:11px' }, svg).textContent = (it.solid ? '100' : val.toFixed(1)) + (this.stale(r) ? ' †' : '');
         const hit = el('rect', { x: L, y: it.y - 2, width: Math.max(w + 40, 30), height: bh + 4, fill: 'transparent', tabindex: 0, class: 'click' }, svg);
         const show = () => tipAt(tip, wrap, x(val), it.y, `<b>${it.body}</b> · ${this.caseLabel(it.c)}<br>${it.solid ? 'reference, 100 %' : `${val.toFixed(1)} % of solid (${r.measure || MEAS[row.type]})`}${r.k !== undefined ? `<br>k = ${fmt(r.k)}` : ''}${it.solid ? '' : this.provisional(r)}<br><span style="color:var(--dim)">click: show it on the right</span>`);
