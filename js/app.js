@@ -22,7 +22,7 @@ const S = {
   mode: 'compare', type: 'bending', sense: '+', joint: null, cmpOff: ['solid'], field: 'MISES', cmap: 'auto', layout: 'rows',
   t: 1, playing: false, playDur: 6, hold: 0, scale: 10, scaleAuto: true, range: 'robust', manual: null,
   secAxis: 'off', secPos: { x: 0, y: 0, z: 0 }, secFlip: false, skin: 1, inner: true, edges: true, rig: true, bands: false,
-  explode: 0, expAx: 1, bodyOff: [], topic: 'radar', theme: 'auto', tour: false, leftW: null, toolsCmp: false, toolsSingle: true,
+  explode: 0, expAx: 1, bodyOff: [], topic: 'fd', theme: 'auto', tour: false, leftW: null, toolsCmp: false, toolsSingle: true,
 };
 const PERSIST = ['mode', 'type', 'sense', 'joint', 'cmpOff', 'field', 'cmap', 'layout', 'range', 'secAxis', 'secFlip', 'skin', 'inner', 'edges', 'rig', 'bands', 'expAx', 'topic', 'theme', 'leftW', 'toolsCmp', 'toolsSingle', 'scaleAuto', 'scale'];
 try { Object.assign(S, Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem('jfea.state') || '{}')).filter(([k]) => PERSIST.includes(k)))); } catch (e) {}
@@ -58,6 +58,11 @@ async function boot() {
     onAxis: (type, sense) => { setMode('compare'); setCase(type, AXIAL.has(type) ? '+' : sense); },
     onBar: (body, key) => { if (!BODIES.includes(body)) return; S.joint = body; setMode('single'); setCase(...splitKey(key)); },
     onCase: (key) => { setCase(...splitKey(key)); },
+    onJoint: (j) => {                                   // radar chip while linked: choose the joint(s) of the view
+      if (S.mode === 'single') S.joint = j;
+      else { S.cmpOff = S.cmpOff.includes(j) ? S.cmpOff.filter(x => x !== j) : [...S.cmpOff, j]; if (BODIES.every(x => S.cmpOff.includes(x))) S.cmpOff = S.cmpOff.filter(x => x !== j); }
+      refresh(false); save();
+    },
   });
   else $('topic-body').innerHTML = '<p class="note">No scores yet: run <code>python compare.py</code> and then <code>python web_export.py --compare-only</code>.</p>';
   buildUI();
@@ -267,6 +272,7 @@ async function refresh(rehome) {
   syncToolbar(); syncTools(); syncSection();
   const key = caseKey(S.type, S.sense), bodies = shownBodies();
   if (charts && charts.cur !== key) charts.setCase(key);
+  charts?.setView({ bodies, key });
   const want = bodies.map(b => ({ body: b, name: `${b}_${key}` }));
   const token = ++loadingToken;
   const missing = want.filter(w => store.has(w.name) && !store.cases.has(w.name));

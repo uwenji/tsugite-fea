@@ -24,13 +24,26 @@ export class Charts {
   constructor(DATA, hooks = {}) {
     this.D = DATA; this.h = hooks;
     this.SOLID = DATA.solid; this.JOINTS = DATA.bodies.filter(b => b !== DATA.solid);
-    this.radState = { off: [], sense: 'both' };
-    try { const s = JSON.parse(localStorage.getItem('jfea.radar') || '{}'); if (Array.isArray(s.off)) this.radState.off = s.off; if (['both', '+', '-'].includes(s.sense)) this.radState.sense = s.sense; } catch (e) {}
+    this.radState = { off: [], sense: 'both', link: true };
+    try { const s = JSON.parse(localStorage.getItem('jfea.radar') || '{}'); if (Array.isArray(s.off)) this.radState.off = s.off; if (['both', '+', '-'].includes(s.sense)) this.radState.sense = s.sense; if (s.link === false) this.radState.link = false; } catch (e) {}
+    this.view = null;                  // what the 3-D view shows: {bodies, key, type}
     const scores = Object.values(DATA.runs).filter(r => this.usable(r)).map(r => r.score);
     this.XMAX = Math.ceil(Math.max(100, ...scores) * 1.04 / 25) * 25;
     this.cur = DATA.cases.find(c => this.withCurve(c))?.key || DATA.cases[0].key;
     this.markers = [];
     this._legends(); this._radarCtl(); this._tabs();
+  }
+
+  /** the bodies and load case on the right: the radar follows them (unless unlinked), bars and curves highlight them */
+  setView(v) {
+    this.view = v; this._syncRadarCtl?.();
+    const t = $('topic-body') && !$('topic-radar').hidden ? 'radar' : !$('topic-bars').hidden ? 'bars' : 'fd';
+    if (t === 'radar') this.drawRadar(); else if (t === 'bars') this.drawBars(); else this.drawFD();
+  }
+  inView(b) { return !this.view || this.view.bodies.includes(b); }
+  radarShown() {
+    if (this.radState.link && this.view) return this.JOINTS.filter(j => this.radHas(j) && this.view.bodies.includes(j));
+    return this.JOINTS.filter(j => this.radHas(j) && !this.radState.off.includes(j));
   }
 
   col(b) { return `var(--s${this.D.slots[b] || 8})`; }
@@ -86,9 +99,11 @@ export class Charts {
       el('line', { x1: x(t), x2: x(t), y1: T, y2: H - 22, style: `stroke:${t === 100 ? 'var(--axis)' : 'var(--grid)'}`, 'stroke-width': t === 100 ? 1.5 : 1 }, svg);
       el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, svg).textContent = t + ' %';
     }
-    placed.forEach(({ row, top }, i) => {
+    const curType = this.view ? D.cases.find(c => c.key === this.view.key)?.type : null;
+    placed.forEach(({ row, top, bottom }, i) => {
+      if (row.type === curType) el('rect', { x: 0, y: top + 1, width: W - 8, height: bottom - top - 2, rx: 4, style: 'fill:var(--accent);fill-opacity:.07' }, svg);
       if (i) el('line', { x1: 0, x2: W - 8, y1: top, y2: top, style: 'stroke:var(--grid)' }, svg);
-      el('text', { x: 0, y: top + pad + 10, class: 'ink' }, svg).textContent = row.label.replace(/ \(.*\)/, '');
+      el('text', { x: 0, y: top + pad + 10, class: row.type === curType ? 'cur' : 'ink' }, svg).textContent = row.label.replace(/ \(.*\)/, '');
       el('text', { x: 0, y: top + pad + 25 }, svg).textContent = MEAS[row.type];
       if (row.miss) el('text', { x: L + 4, y: row.missY, style: 'font-size:11px' }, svg).textContent = row.miss;
       row.items.forEach(it => {
@@ -97,7 +112,8 @@ export class Charts {
         const w = Math.max(2, x(val) - L), rr = Math.min(4, w / 2);
         const d = `M${L},${it.y} h${w - rr} a${rr},${rr} 0 0 1 ${rr},${rr} v${bh - 2 * rr} a${rr},${rr} 0 0 1 -${rr},${rr} h-${w - rr} z`;
         const fill = it.c.sense === '-' && !it.solid ? `url(#h-${it.body})` : this.col(it.body);
-        el('path', { d, style: `fill:${fill};opacity:${!this.stale(r) || it.solid ? 1 : 0.45}` }, svg);
+        const dim = !it.solid && !this.inView(it.body), here = this.view && it.c.key === this.view.key && this.inView(it.body);
+        el('path', { d, style: `fill:${fill};opacity:${(!this.stale(r) || it.solid ? 1 : 0.45) * (dim ? 0.22 : 1)}` + (here ? ';stroke:var(--fg);stroke-width:1.5' : '') }, svg);
         el('text', { x: x(val) + 6, y: it.y + 9, class: 'ink', style: 'font-size:11px' }, svg).textContent = (it.solid ? '100' : val.toFixed(1)) + (this.stale(r) ? ' †' : '');
         const hit = el('rect', { x: L, y: it.y - 2, width: Math.max(w + 40, 30), height: bh + 4, fill: 'transparent', tabindex: 0, class: 'click' }, svg);
         const show = () => tipAt(tip, wrap, x(val), it.y, `<b>${it.body}</b> · ${this.caseLabel(it.c)}<br>${it.solid ? 'reference, 100 %' : `${val.toFixed(1)} % of solid (${r.measure || MEAS[row.type]})`}${r.k !== undefined ? `<br>k = ${fmt(r.k)}` : ''}${it.solid ? '' : this.provisional(r)}<br><span style="color:var(--dim)">click: show it on the right</span>`);
@@ -115,14 +131,23 @@ export class Charts {
     const radHas = j => RAD_AX.some(([t]) => this.keysOf(t).some(c => this.usable(this.R(j, c.key))));
     this.radHas = radHas;
     ctl.innerHTML = `<div class="cchips" role="group" aria-label="Joints shown">${this.JOINTS.map(j => `<button data-j="${j}"${radHas(j) ? '' : ' disabled title="no complete run yet"'}><i class="key" style="background:${this.col(j)}"></i>${j}</button>`).join('')}</div>` +
-      `<div class="seg" role="group" aria-label="Sense shown"><button data-s="both">+ and −</button><button data-s="+">+ only</button><button data-s="-">− only</button></div>`;
+      `<div class="seg" role="group" aria-label="Sense shown"><button data-s="both">+ and −</button><button data-s="+">+ only</button><button data-s="-">− only</button>` +
+      `<button class="link" data-link title="linked: the radar shows the joints of the 3-D view, and these chips choose them there. Unlink to pick joints here on their own.">unlink</button></div>`;
     const save = () => { try { localStorage.setItem('jfea.radar', JSON.stringify(st)); } catch (e) {} };
     const sync = () => {
-      ctl.querySelectorAll('[data-j]').forEach(b => b.setAttribute('aria-pressed', radHas(b.dataset.j) && !st.off.includes(b.dataset.j)));
+      const shown = this.radarShown();
+      ctl.querySelectorAll('[data-j]').forEach(b => b.setAttribute('aria-pressed', shown.includes(b.dataset.j)));
       ctl.querySelectorAll('[data-s]').forEach(b => b.setAttribute('aria-pressed', b.dataset.s === st.sense));
+      const lk = ctl.querySelector('[data-link]'); lk.setAttribute('aria-pressed', !st.link); lk.textContent = st.link ? 'unlink' : 'link';
+      lk.title = st.link ? 'linked: the radar shows the joints of the 3-D view, and these chips choose them there. Click to pick joints here on their own.' : 'unlinked: the joints are picked here. Click to follow the 3-D view again.';
     };
+    this._syncRadarCtl = sync;
     ctl.querySelectorAll('[data-j]').forEach(b => b.addEventListener('click', () => { const j = b.dataset.j;
+      if (st.link && this.view && this.h.onJoint) { this.h.onJoint(j); return; }        // linked: the chip acts on the view
       st.off = st.off.includes(j) ? st.off.filter(x => x !== j) : [...st.off, j]; save(); sync(); this.drawRadar(); }));
+    ctl.querySelector('[data-link]').addEventListener('click', () => {
+      if (st.link) st.off = this.JOINTS.filter(j => !this.radarShown().includes(j));   // keep what is shown now as the free choice
+      st.link = !st.link; save(); sync(); this.drawRadar(); });
     ctl.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => { st.sense = b.dataset.s; save(); sync(); this.drawRadar(); }));
     sync();
     const lineKey = (dash, hollow) => `<svg class="lkey" viewBox="0 0 22 10"><line x1="1" y1="5" x2="21" y2="5" stroke-width="2" style="stroke:var(--muted)"${dash ? ' stroke-dasharray="5 3"' : ''}/><circle cx="11" cy="5" r="3" stroke-width="2" style="fill:${hollow ? 'var(--surface)' : 'var(--muted)'};stroke:${hollow ? 'var(--muted)' : 'var(--surface)'}"/></svg>`;
@@ -151,10 +176,13 @@ export class Charts {
       const lines = narrow ? (lab.startsWith('Bending ') ? ['Bending', lab.slice(8)] : [lab]) : [lab, MEAS[t]], lh = narrow ? 13 : 15;
       const anchor = Math.abs(c) < 0.3 ? 'middle' : c > 0 ? 'start' : 'end';
       const y0 = s < -0.5 ? y - 5 - lh * (lines.length - 1) : s > 0.5 ? y + 12 : y + 4 - lh * (lines.length - 1) / 2;
-      lines.forEach((txt, k) => el('text', { x, y: y0 + k * lh, 'text-anchor': anchor, class: k && !narrow ? '' : 'ink', style: `font-size:${narrow || k ? 11 : 12}px` }, svg).textContent = txt);
+      const cur = this.view && this.D.cases.find(c => c.key === this.view.key)?.type === t;
+      lines.forEach((txt, k) => el('text', { x, y: y0 + k * lh, 'text-anchor': anchor, class: k && !narrow ? (cur ? 'cur' : '') : (cur ? 'cur' : 'ink'), style: `font-size:${narrow || k ? 11 : 12}px` }, svg).textContent = txt);
+      if (cur) { spokes[i].style.stroke = 'var(--accent)'; spokes[i].setAttribute('stroke-width', 1.5); spokes[i].dataset.cur = 1; }
     });
     const senses = st.sense === 'both' ? ['+', '-'] : [st.sense];
-    const shown = this.JOINTS.filter(j => this.radHas(j) && !st.off.includes(j));
+    const shown = this.radarShown();
+    const curType = this.view ? this.D.cases.find(c => c.key === this.view.key)?.type : null;
     const gF = el('g', {}, svg), gL = el('g', {}, svg), gM = el('g', {}, svg), gH = el('g', {}, svg);
     if (!shown.length) el('text', { x: cx, y: cy - 8, 'text-anchor': 'middle' }, svg).textContent = this.JOINTS.some(this.radHas) ? 'no joint selected' : 'no complete joint run yet';
     shown.forEach(j => senses.forEach(s => {
@@ -173,13 +201,14 @@ export class Charts {
     const ab = -Math.PI / 2 - Math.PI / n;
     for (let t = 25; t <= this.XMAX; t += 25) { const r = Rpx * t / this.XMAX * Math.cos(Math.PI / n);
       el('text', { x: cx + r * Math.cos(ab) - 3, y: cy + r * Math.sin(ab) + 4, 'text-anchor': 'end', style: 'font-size:11px;fill:var(--faint);paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round' }, svg).textContent = t === 100 ? '100 %' : t; }
-    const hide = () => { tip.hidden = true; spokes.forEach(l => l.style.stroke = 'var(--grid)'); };
+    const baseStroke = l => l.dataset.cur ? 'var(--accent)' : 'var(--grid)';
+    const hide = () => { tip.hidden = true; spokes.forEach(l => l.style.stroke = baseStroke(l)); };
     RAD_AX.forEach(([t, lab], i) => {
       const a1 = ang(i) - Math.PI / n, a2 = ang(i) + Math.PI / n, rr = Rpx + 12;
       const d = `M${cx},${cy} L${cx + rr * Math.cos(a1)},${cy + rr * Math.sin(a1)} A${rr},${rr} 0 0 1 ${cx + rr * Math.cos(a2)},${cy + rr * Math.sin(a2)} Z`;
       const w = el('path', { d, fill: 'transparent', tabindex: 0, 'aria-label': lab, class: 'click' }, gH);
       const show = () => {
-        spokes.forEach((l, k) => l.style.stroke = k === i ? 'var(--axis)' : 'var(--grid)');
+        spokes.forEach((l, k) => l.style.stroke = k === i ? 'var(--axis)' : baseStroke(l));
         const axial = this.keysOf(t).length === 1;
         const rows = shown.map(j => `<i class="key" style="background:${this.col(j)}"></i> ${j}: ` + (axial ? [null] : senses).map(s => {
           const v = radVal(j, t, s || '+'), txt = v.v === null ? (v.r.rerun ? 'rerun pending' : v.r.state === 'not written' ? '—' : v.r.state) : `${v.v.toFixed(1)} %${this.stale(v.r) ? ' †' : ''}`;
@@ -229,9 +258,10 @@ export class Charts {
     const ym = T + (H - T - B) / 2; el('text', { x: 14, y: ym, 'text-anchor': 'middle', transform: `rotate(-90 14 ${ym})` }, svg).textContent = ax[1];
     const ends = [];
     bodies.forEach(b => { const r = this.R(b, cur); const pts = [[0, 0], ...r.u.map((u, i) => [u, r.F[i]])];
-      el('polyline', { points: pts.map(([u, f]) => `${x(u)},${y(f)}`).join(' '), fill: 'none', style: `stroke:${this.col(b)};opacity:${!this.stale(r) ? 1 : .55}`, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+      const dim = b !== this.SOLID && !this.inView(b) ? 0.25 : 1;
+      el('polyline', { points: pts.map(([u, f]) => `${x(u)},${y(f)}`).join(' '), fill: 'none', style: `stroke:${this.col(b)};opacity:${(!this.stale(r) ? 1 : .55) * dim}`, 'stroke-width': dim < 1 ? 1.5 : 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
       const [ue, fe] = pts[pts.length - 1];
-      el('circle', { cx: x(ue), cy: y(fe), r: 4.5, style: `fill:${this.col(b)};stroke:var(--surface)`, 'stroke-width': 2 }, svg);
+      el('circle', { cx: x(ue), cy: y(fe), r: 4.5, style: `fill:${this.col(b)};stroke:var(--surface);opacity:${dim}`, 'stroke-width': 2 }, svg);
       ends.push({ b, xe: x(ue), ye: y(fe), fe, r }); });
     ends.sort((p, q) => p.ye - q.ye); let last = -1e9;
     ends.forEach(e => { const yy = Math.max(e.ye + 4, last + 15); last = yy;
